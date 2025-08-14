@@ -1,4 +1,4 @@
-module github.com/sixdouglas/suncalc
+module github.com/kixorz/suncalc
 
 go 1.18
 

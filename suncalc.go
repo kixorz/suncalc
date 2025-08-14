@@ -1,431 +1,256 @@
 package suncalc
 
-// Translated in GO from the NPM library:
-//   https://github.com/mourner/suncalc
-
 import (
-	"math"
 	"time"
 )
 
-// date/DayTime constants and conversions
-const millyToNano = 1000000
-const dayMs = 1000 * 60 * 60 * 24
-const J1970 = 2440588
-const J2000 = 2451545
+// Usage:
+//
+//	// Create a new SunCalculator for a specific location and date
+//	sc := NewSunCalculator(latitude, longitude, time.Now())
+//
+//	// Get the current day phase
+//	phase := sc.GetCurrentPhase()
+//
+//	// Check if it's currently a specific phase
+//	if sc.IsGoldenHour() {
+//	    // Take golden hour photos
+//	}
+//
+//	// Get all calculated sun times for the day
+//	times := sc.GetAllTimes()
 
-var invalidDate = time.Date(1677, 9, 21, 0, 12, 43, 145224192, time.UTC)
-
-func timeToUnixMillis(date time.Time) int64 {
-	return int64(float64(date.UTC().UnixNano()) / millyToNano)
-}
-func unixMillisToTime(date float64, location *time.Location) time.Time {
-	return time.Unix(0, int64(date*millyToNano)).In(location)
-}
-func toJulian(date time.Time) float64 { return float64(timeToUnixMillis(date))/dayMs - 0.5 + J1970 }
-func fromJulian(j float64, location *time.Location) time.Time {
-	julianTime := unixMillisToTime((j+0.5-J1970)*dayMs, location)
-	if invalidDate.Equal(julianTime.UTC()) {
-		return time.Time{}
-	}
-	return julianTime
-}
-func toDays(date time.Time) float64 { return toJulian(date) - J2000 }
-
-// general calculations for position
-const rad = math.Pi / 180
-const e = rad * 23.4397 // obliquity of the Earth
-
-func rightAscension(l float64, b float64) float64 {
-	return math.Atan2(math.Sin(l)*math.Cos(e)-math.Tan(b)*math.Sin(e), math.Cos(l))
-}
-
-func declination(l float64, b float64) float64 {
-	return math.Asin(math.Sin(b)*math.Cos(e) + math.Cos(b)*math.Sin(e)*math.Sin(l))
-}
-
-func azimuth(H float64, phi float64, dec float64) float64 {
-	return math.Atan2(math.Sin(H), math.Cos(H)*math.Sin(phi)-math.Tan(dec)*math.Cos(phi))
-}
-
-func altitude(H float64, phi float64, dec float64) float64 {
-	return math.Asin(math.Sin(phi)*math.Sin(dec) + math.Cos(phi)*math.Cos(dec)*math.Cos(H))
-}
-
-func siderealTime(d float64, lw float64) float64 { return rad*(280.16+360.9856235*d) - lw }
-
-func astroRefraction(h float64) float64 {
-	if h < 0.0 {
-		h = 0 // if h = -0.08901179 a div/0 would occur.
-	} // the following formula works for positive altitudes only.
-
-	// formula 16.4 of "Astronomical Algorithms" 2nd edition by Jean Meeus (Willmann-Bell, Richmond) 1998.
-	// 1.02 / tan(h + 10.26 / (h + 5.10)) h in degrees, result in arc minutes -> converted to rad:
-	return 0.0002967 / math.Tan(h+0.00312536/(h+0.08901179))
-}
-
-// general sun calculations
-
-func solarMeanAnomalyI(d float64) float64 { return solarMeanAnomalyF(d) }
-func solarMeanAnomalyF(d float64) float64 { return rad * (357.5291 + 0.98560028*d) }
-
-func eclipticLongitude(M float64) float64 {
-
-	var C = rad * (1.9148*math.Sin(M) + 0.02*math.Sin(2*M) + 0.0003*math.Sin(3*M)) // equation of center
-	var P = rad * 102.9372                                                         // perihelion of the Earth
-
-	return M + C + P + math.Pi
-}
-
-type DayTimeName string
+// DayPhase represents different phases of the day
+// Each phase corresponds to a specific period of the day based on the sun's position
+type DayPhase string
 
 const (
-	Sunrise DayTimeName = "sunrise" // sunrise (top edge of the sun appears on the horizon)
-	Sunset  DayTimeName = "sunset"  // sunset (sun disappears below the horizon, evening civil twilight starts)
+	// PhaseNight represents full darkness when the sun is far below the horizon
+	PhaseNight DayPhase = "night" // Full night time
 
-	SunriseEnd  DayTimeName = "sunriseEnd"  // sunrise ends (bottom edge of the sun touches the horizon)
-	SunsetStart DayTimeName = "sunsetStart" // sunset starts (bottom edge of the sun touches the horizon)
+	// PhaseAstroDawn represents the period when the sun is between 18° and 12° below the horizon (morning)
+	PhaseAstroDawn DayPhase = "astroDawn" // Astronomical dawn (night ends)
 
-	Dawn DayTimeName = "dawn" // dawn (morning nautical twilight ends, morning civil twilight starts)
-	Dusk DayTimeName = "dusk" // dusk (evening nautical twilight starts)
+	// PhaseNauticalDawn represents the period when the sun is between 12° and 6° below the horizon (morning)
+	PhaseNauticalDawn DayPhase = "nauticalDawn" // Nautical dawn
 
-	NauticalDawn DayTimeName = "nauticalDawn" // nautical dawn (morning nautical twilight starts)
-	NauticalDusk DayTimeName = "nauticalDusk" // nautical dusk (evening astronomical twilight starts)
+	// PhaseCivilDawn represents the period when the sun is between 6° below the horizon and sunrise (morning twilight)
+	PhaseCivilDawn DayPhase = "civilDawn" // Civil dawn (morning twilight)
 
-	NightEnd DayTimeName = "nightEnd" // night ends (morning astronomical twilight starts)
-	Night    DayTimeName = "night"    // night starts (dark enough for astronomical observations)
+	// PhaseSunrise represents the period when the sun is rising above the horizon
+	PhaseSunrise DayPhase = "sunrise" // Sunrise period
 
-	GoldenHourEnd DayTimeName = "goldenHourEnd" // morning golden hour (soft light, best DayTime for photography) ends
-	GoldenHour    DayTimeName = "goldenHour"    // evening golden hour starts
+	// PhaseGoldenMorning represents the period shortly after sunrise with soft, warm light (morning golden hour)
+	PhaseGoldenMorning DayPhase = "goldenMorning" // Morning golden hour
 
-	SolarNoon DayTimeName = "solarNoon" // solar noon (sun is in the highest position)
-	Nadir     DayTimeName = "nadir"     // nadir (darkest moment of the night, sun is in the lowest position)
+	// PhaseDay represents the period of full daylight between the golden hours
+	PhaseDay DayPhase = "day" // Full daylight
+
+	// PhaseGoldenEvening represents the period shortly before sunset with soft, warm light (evening golden hour)
+	PhaseGoldenEvening DayPhase = "goldenEvening" // Evening golden hour
+
+	// PhaseSunset represents the period when the sun is setting below the horizon
+	PhaseSunset DayPhase = "sunset" // Sunset period
+
+	// PhaseCivilDusk represents the period when the sun is between sunset and 6° below the horizon (evening twilight)
+	PhaseCivilDusk DayPhase = "civilDusk" // Civil dusk (evening twilight)
+
+	// PhaseNauticalDusk represents the period when the sun is between 6° and 12° below the horizon (evening)
+	PhaseNauticalDusk DayPhase = "nauticalDusk" // Nautical dusk
+
+	// PhaseAstroDusk represents the period when the sun is between 12° and 18° below the horizon (evening)
+	PhaseAstroDusk DayPhase = "astroDusk" // Astronomical dusk (night starts)
 )
 
-type DayTime struct {
-	Name  DayTimeName
-	Value time.Time
+// SunCalculator provides methods to determine sun positions and day phases
+// It wraps the suncalc library to provide a simpler API for day phase calculations
+// and binary getter methods for each phase.
+type SunCalculator struct {
+	latitude  float64                 // Latitude in decimal degrees (positive for north, negative for south)
+	longitude float64                 // Longitude in decimal degrees (positive for east, negative for west)
+	date      time.Time               // Date for which sun calculations are performed
+	times     map[DayTimeName]DayTime // Cached sun times for the day
 }
 
-type dayTimeConf struct {
-	angle       float64
-	morningName DayTimeName
-	eveningName DayTimeName
-}
-
-type coord struct {
-	declination    float64
-	rightAscension float64
-}
-
-func sunCoords(d float64) coord {
-	var M = solarMeanAnomalyI(d)
-	var L = eclipticLongitude(M)
-
-	return coord{
-		declination(L, 0),
-		rightAscension(L, 0),
-	}
-}
-
-type SunPosition struct {
-	Azimuth  float64
-	Altitude float64
-}
-
-// calculates sun position for a given date and latitude/longitude
-func GetPosition(date time.Time, lat float64, lng float64) SunPosition {
-
-	var lw = rad * -lng
-	var phi = rad * lat
-	var d = toDays(date)
-	var c = sunCoords(d)
-	var H = siderealTime(d, lw) - c.rightAscension
-
-	return SunPosition{
-		azimuth(H, phi, c.declination),
-		altitude(H, phi, c.declination),
-	}
-}
-
-// sun times configuration (angle, morning name, evening name)
-var times = []dayTimeConf{
-	{-0.833, Sunrise, Sunset},
-	{-0.3, SunriseEnd, SunsetStart},
-	{-6, Dawn, Dusk},
-	{-12, NauticalDawn, NauticalDusk},
-	{-18, NightEnd, Night},
-	{6, GoldenHourEnd, GoldenHour},
-}
-
-var DayTimeNames = []DayTimeName{
-	NightEnd, NauticalDawn, Dawn, Sunrise, SunriseEnd, GoldenHourEnd, GoldenHour, SunsetStart, Sunset, Dusk, NauticalDusk, Night,
-}
-
-// calculations for sun times
-const J0 = 0.0009
-
-func julianCycle(d float64, lw float64) float64 { return math.Round(d - J0 - lw/(2*math.Pi)) }
-
-func approxTransit(Ht float64, lw float64, n float64) float64 {
-	return J0 + (Ht+lw)/(2*math.Pi) + n
-}
-func solarTransitJ(ds float64, M float64, L float64) float64 {
-	return J2000 + ds + 0.0053*math.Sin(M) - 0.0069*math.Sin(2*L)
-}
-func hourAngle(h float64, phi float64, d float64) float64 {
-	return math.Acos((math.Sin(h) - math.Sin(phi)*math.Sin(d)) / (math.Cos(phi) * math.Cos(d)))
-}
-func observerAngle(height float64) float64 {
-	if height == 0 {
-		return 0
-	}
-	return -2.076 * math.Sqrt(height) / 60.0
-}
-
-// returns set DayTime for the given sun altitude
-func getSetJ(h float64, lw float64, phi float64, dec float64, n float64, M float64, L float64) float64 {
-	var w = hourAngle(h, phi, dec)
-	var a = approxTransit(w, lw, n)
-	return solarTransitJ(a, M, L)
-}
-
-// calculates sun times for a given date and latitude/longitude
-func GetTimes(date time.Time, lat float64, lng float64) map[DayTimeName]DayTime {
-	return GetTimesWithObserver(date, Observer{lat, lng, 0, time.UTC})
-}
-
-type Observer struct {
-	// Location of the observer
-	Latitude, Longitude,
-
-	// The observer height (in meters) relative to the horizon
-	Height float64
-
-	Location *time.Location
-}
-
-// calculates sun times for a given date and latitude/longitude, and,
-// the observer height (in meters) relative to the horizon, you can set it to 0 if unknown
-func GetTimesWithObserver(date time.Time, obs Observer) map[DayTimeName]DayTime {
-	lw := rad * -obs.Longitude
-	phi := rad * obs.Latitude
-
-	dh := observerAngle(obs.Height)
-
-	d := toDays(date)
-	n := julianCycle(d, lw)
-	ds := approxTransit(0, lw, n)
-
-	M := solarMeanAnomalyF(ds)
-	L := eclipticLongitude(M)
-	dec := declination(L, 0)
-
-	Jnoon := solarTransitJ(ds, M, L)
-
-	var oneTime dayTimeConf
-	result := make(map[DayTimeName]DayTime)
-
-	result[SolarNoon] = DayTime{SolarNoon, fromJulian(Jnoon, obs.Location)}
-	result[Nadir] = DayTime{Nadir, fromJulian(Jnoon-0.5, obs.Location)}
-
-	for i := 0; i < len(times); i++ {
-		oneTime = times[i]
-		h0 := (oneTime.angle + dh) * rad
-
-		Jset := getSetJ(h0, lw, phi, dec, n, M, L)
-		Jrise := Jnoon - (Jset - Jnoon)
-
-		result[oneTime.morningName] = DayTime{oneTime.morningName, fromJulian(Jrise, obs.Location)}
-		result[oneTime.eveningName] = DayTime{oneTime.eveningName, fromJulian(Jset, obs.Location)}
+// NewSunCalculator creates a new SunCalculator for the given coordinates and date
+// Parameters:
+//   - latitude: Latitude in decimal degrees (positive for north, negative for south)
+//   - longitude: Longitude in decimal degrees (positive for east, negative for west)
+//   - date: Date for which to calculate sun times (the time component is used for the day)
+//
+// Returns a pointer to a new SunCalculator with pre-calculated sun times for the specified day
+func NewSunCalculator(latitude, longitude float64, date time.Time) *SunCalculator {
+	sc := &SunCalculator{
+		latitude:  latitude,
+		longitude: longitude,
+		date:      date,
 	}
 
-	return result
+	// Calculate all sun times for the day
+	sc.times = GetTimes(date, latitude, longitude)
+
+	return sc
 }
 
-type moonCoordinates struct {
-	rightAscension float64
-	declination    float64
-	distance       float64
-}
+// GetCurrentPhase determines the current day phase based on the current time
+// This method compares the current time with the pre-calculated sun times
+// to determine which phase of the day it currently is.
+//
+// Returns a DayPhase constant representing the current phase of the day
+func (sc *SunCalculator) GetCurrentPhase() DayPhase {
+	now := time.Now()
 
-// moon calculations, based on http://aa.quae.nl/en/reken/hemelpositie.html formulas
-func moonCoords(d float64) moonCoordinates { // geocentric ecliptic coordinates of the moon
-	L := rad * (218.316 + 13.176396*d) // ecliptic longitude
-	M := rad * (134.963 + 13.064993*d) // mean anomaly
-	F := rad * (93.272 + 13.229350*d)  // mean distance
-
-	l := L + rad*6.289*math.Sin(M)   // longitude
-	b := rad * 5.128 * math.Sin(F)   // latitude
-	dt := 385001 - 20905*math.Cos(M) // distance to the moon in km
-
-	return moonCoordinates{
-		rightAscension(l, b),
-		declination(l, b),
-		dt,
-	}
-}
-
-type MoonPosition struct {
-	Azimuth          float64
-	Altitude         float64
-	Distance         float64
-	ParallacticAngle float64
-}
-
-func GetMoonPosition(date time.Time, lat float64, lng float64) MoonPosition {
-	lw := rad * -lng
-	phi := rad * lat
-	d := toDays(date)
-
-	c := moonCoords(d)
-	H := siderealTime(d, lw) - c.rightAscension
-	h := altitude(H, phi, c.declination)
-	// formula 14.1 of "Astronomical Algorithms" 2nd edition by Jean Meeus (Willmann-Bell, Richmond) 1998.
-	pa := math.Atan2(math.Sin(H), math.Tan(phi)*math.Cos(c.declination)-math.Sin(c.declination)*math.Cos(H))
-	h = h + astroRefraction(h) // altitude correction for refraction
-
-	return MoonPosition{
-		azimuth(H, phi, c.declination),
-		h,
-		c.distance,
-		pa,
-	}
-}
-
-type MoonIllumination struct {
-	Fraction float64
-	Phase    float64
-	Angle    float64
-}
-
-// calculations for illumination parameters of the moon,
-// based on http://idlastro.gsfc.nasa.gov/ftp/pro/astro/mphase.pro formulas and
-// Chapter 48 of "Astronomical Algorithms" 2nd edition by Jean Meeus (Willmann-Bell, Richmond) 1998.
-func GetMoonIllumination(date time.Time) MoonIllumination {
-
-	d := toDays(date)
-	s := sunCoords(d)
-	m := moonCoords(d)
-
-	sdist := 149598000. // distance from Earth to Sun in km
-
-	phi := math.Acos(math.Sin(s.declination)*math.Sin(m.declination) + math.Cos(s.declination)*math.Cos(m.declination)*math.Cos(s.rightAscension-m.rightAscension))
-	inc := math.Atan2(sdist*math.Sin(phi), m.distance-sdist*math.Cos(phi))
-	angle := math.Atan2(math.Cos(s.declination)*math.Sin(s.rightAscension-m.rightAscension), math.Sin(s.declination)*math.Cos(m.declination)-math.Cos(s.declination)*math.Sin(m.declination)*math.Cos(s.rightAscension-m.rightAscension))
-	phaseAngle := 1.
-	if angle < 0 {
-		phaseAngle = -1.
+	// Check if we're before sunrise (night or dawn phases)
+	if now.Before(sc.times[NightEnd].Value) {
+		return PhaseNight
+	} else if now.Before(sc.times[NauticalDawn].Value) {
+		return PhaseAstroDawn
+	} else if now.Before(sc.times[Dawn].Value) {
+		return PhaseNauticalDawn
+	} else if now.Before(sc.times[Sunrise].Value) {
+		return PhaseCivilDawn
+	} else if now.Before(sc.times[SunriseEnd].Value) {
+		return PhaseSunrise
+	} else if now.Before(sc.times[GoldenHourEnd].Value) {
+		return PhaseGoldenMorning
 	}
 
-	return MoonIllumination{
-		(1 + math.Cos(inc)) / 2,
-		0.5 + 0.5*inc*phaseAngle/math.Pi,
-		angle,
+	// Check if we're after sunset (dusk or night phases)
+	if now.After(sc.times[Night].Value) {
+		return PhaseNight
+	} else if now.After(sc.times[NauticalDusk].Value) {
+		return PhaseAstroDusk
+	} else if now.After(sc.times[Dusk].Value) {
+		return PhaseNauticalDusk
+	} else if now.After(sc.times[Sunset].Value) {
+		return PhaseCivilDusk
+	} else if now.After(sc.times[SunsetStart].Value) {
+		return PhaseSunset
+	} else if now.After(sc.times[GoldenHour].Value) {
+		return PhaseGoldenEvening
 	}
+
+	// If none of the above, it's full daylight
+	return PhaseDay
 }
 
-func hoursLater(date time.Time, h float64) time.Time {
-	return date.Add(time.Duration(h * dayMs / 24 * millyToNano))
+// Binary getter methods for each phase
+
+// IsNight returns true if current time is during night
+// Night is the period when the sun is far below the horizon (more than 18°)
+func (sc *SunCalculator) IsNight() bool {
+	return sc.GetCurrentPhase() == PhaseNight
 }
 
-type MoonTimes struct {
-	Rise       time.Time
-	Set        time.Time
-	AlwaysUp   bool
-	AlwaysDown bool
+// IsAstroDawn returns true if current time is during astronomical dawn
+// Astronomical dawn is when the sun is between 18° and 12° below the horizon in the morning
+func (sc *SunCalculator) IsAstroDawn() bool {
+	return sc.GetCurrentPhase() == PhaseAstroDawn
 }
 
-// calculations for moon rise/set times are based on http://www.stargazing.net/kepler/moonrise.html article
-func GetMoonTimes(date time.Time, lat float64, lng float64, inUTC bool) MoonTimes {
-	if inUTC {
-		return GetMoonTimesWithObserver(date, Observer{lat, lng, 0, time.UTC})
-	}
-	return GetMoonTimesWithObserver(date, Observer{lat, lng, 0, date.Location()})
+// IsNauticalDawn returns true if current time is during nautical dawn
+// Nautical dawn is when the sun is between 12° and 6° below the horizon in the morning
+func (sc *SunCalculator) IsNauticalDawn() bool {
+	return sc.GetCurrentPhase() == PhaseNauticalDawn
 }
 
-// calculations for moon rise/set times are based on http://www.stargazing.net/kepler/moonrise.html article
-func GetMoonTimesWithObserver(date time.Time, obs Observer) MoonTimes {
-	t := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, obs.Location)
+// IsCivilDawn returns true if current time is during civil dawn
+// Civil dawn is when the sun is between 6° below the horizon and sunrise
+func (sc *SunCalculator) IsCivilDawn() bool {
+	return sc.GetCurrentPhase() == PhaseCivilDawn
+}
 
-	dh := observerAngle(obs.Height)
+// IsSunrise returns true if current time is during sunrise
+// Sunrise is the period when the sun is rising above the horizon
+func (sc *SunCalculator) IsSunrise() bool {
+	return sc.GetCurrentPhase() == PhaseSunrise
+}
 
-	hc := (0.133 + dh) * rad
-	h0 := GetMoonPosition(t, obs.Latitude, obs.Longitude).Altitude - hc
-	var ye float64
-	var x1 float64
-	var x2 float64
-	var rise float64
-	var set float64
+// IsGoldenMorning returns true if current time is during morning golden hour
+// Morning golden hour is the period shortly after sunrise with soft, warm light
+func (sc *SunCalculator) IsGoldenMorning() bool {
+	return sc.GetCurrentPhase() == PhaseGoldenMorning
+}
 
-	// go in 2-hour chunks, each DayTime seeing if a 3-point quadratic curve crosses zero (which means rise or set)
-	i := int64(1)
-	for i <= 24 {
+// IsDay returns true if current time is during full daylight
+// Day is the period of full daylight between the golden hours
+func (sc *SunCalculator) IsDay() bool {
+	return sc.GetCurrentPhase() == PhaseDay
+}
 
-		h1 := GetMoonPosition(hoursLater(t, float64(i)), obs.Latitude, obs.Longitude).Altitude - hc
-		h2 := GetMoonPosition(hoursLater(t, float64(i+1)), obs.Latitude, obs.Longitude).Altitude - hc
-		a := (h0+h2)/2 - h1
-		b := (h2 - h0) / 2
-		xe := -b / (2 * a)
-		ye = (a*xe+b)*xe + h1
-		d := b*b - 4*a*h1
-		roots := 0
-		if d >= 0 {
-			dx := math.Sqrt(d) / (math.Abs(a) * 2)
-			x1 = xe - dx
-			x2 = xe + dx
-			if math.Abs(x1) <= 1 {
-				roots++
-			}
-			if math.Abs(x2) <= 1 {
-				roots++
-			}
-			if x1 < -1 {
-				x1 = x2
-			}
-		}
+// IsGoldenEvening returns true if current time is during evening golden hour
+// Evening golden hour is the period shortly before sunset with soft, warm light
+func (sc *SunCalculator) IsGoldenEvening() bool {
+	return sc.GetCurrentPhase() == PhaseGoldenEvening
+}
 
-		if roots == 1 {
-			if h0 < 0 {
-				rise = float64(i) + x1
-			} else {
-				set = float64(i) + x1
-			}
+// IsSunset returns true if current time is during sunset
+// Sunset is the period when the sun is setting below the horizon
+func (sc *SunCalculator) IsSunset() bool {
+	return sc.GetCurrentPhase() == PhaseSunset
+}
 
-		} else {
-			if roots == 2 {
-				if ye < 0 {
-					rise = float64(i) + x2
-					set = float64(i) + x1
-				} else {
-					rise = float64(i) + x1
-					set = float64(i) + x2
-				}
-			}
-		}
-		if rise != 0 && set != 0 {
-			break
-		}
+// IsCivilDusk returns true if current time is during civil dusk
+// Civil dusk is when the sun is between sunset and 6° below the horizon
+func (sc *SunCalculator) IsCivilDusk() bool {
+	return sc.GetCurrentPhase() == PhaseCivilDusk
+}
 
-		h0 = h2
-		i += 2
+// IsNauticalDusk returns true if current time is during nautical dusk
+// Nautical dusk is when the sun is between 6° and 12° below the horizon in the evening
+func (sc *SunCalculator) IsNauticalDusk() bool {
+	return sc.GetCurrentPhase() == PhaseNauticalDusk
+}
+
+// IsAstroDusk returns true if current time is during astronomical dusk
+// Astronomical dusk is when the sun is between 12° and 18° below the horizon in the evening
+func (sc *SunCalculator) IsAstroDusk() bool {
+	return sc.GetCurrentPhase() == PhaseAstroDusk
+}
+
+// GetAllTimes returns all calculated sun times for the day
+// This provides access to the raw sun times calculated by the suncalc library
+func (sc *SunCalculator) GetAllTimes() map[DayTimeName]DayTime {
+	return sc.times
+}
+
+// GetSunPosition returns the position of the sun (azimuth and altitude) for the given time
+// If no time is provided, it uses the current time
+// Returns an object with Azimuth and Altitude properties in radians
+func (sc *SunCalculator) GetSunPosition(t ...time.Time) SunPosition {
+	timeToUse := time.Now()
+	if len(t) > 0 {
+		timeToUse = t[0]
 	}
+	return GetPosition(timeToUse, sc.latitude, sc.longitude)
+}
 
-	var result = MoonTimes{}
+// GetMoonPosition returns the position of the moon for the given time
+// If no time is provided, it uses the current time
+// Returns an object with Altitude, Azimuth, Distance and ParallacticAngle properties
+func (sc *SunCalculator) GetMoonPosition(t ...time.Time) MoonPosition {
+	timeToUse := time.Now()
+	if len(t) > 0 {
+		timeToUse = t[0]
+	}
+	return GetMoonPosition(timeToUse, sc.latitude, sc.longitude)
+}
 
-	if rise != 0 {
-		result.Rise = hoursLater(t, rise)
+// GetMoonIllumination returns information about the moon's illumination for the given time
+// If no time is provided, it uses the current time
+// Returns an object with Fraction, Phase, and Angle properties
+func (sc *SunCalculator) GetMoonIllumination(t ...time.Time) MoonIllumination {
+	timeToUse := time.Now()
+	if len(t) > 0 {
+		timeToUse = t[0]
 	}
-	if set != 0 {
-		result.Set = hoursLater(t, set)
-	}
-	if rise == 0 && set == 0 {
-		if ye > 0 {
-			result.AlwaysUp = true
-		} else {
-			result.AlwaysDown = true
-		}
-	}
+	return GetMoonIllumination(timeToUse)
+}
 
-	return result
+// GetMoonTimes returns the moon rise and set times for the given date
+// If no date is provided, it uses the current date
+// If inUTC is true, it will search the specified date from 0 to 24 UTC hours
+// Returns an object with Rise, Set, AlwaysUp, and AlwaysDown properties
+func (sc *SunCalculator) GetMoonTimes(date time.Time) MoonTimes {
+	return GetMoonTimes(date, sc.latitude, sc.longitude)
 }
