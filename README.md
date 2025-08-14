@@ -2,6 +2,8 @@
 
 A lightweight Go library for calculating sun/moon positions and phases.
 
+**Current Version: 1.0.0**
+
 ## Overview
 
 SunCalc is a BSD-licensed Go library that provides precise calculations for:
@@ -13,6 +15,12 @@ SunCalc is a BSD-licensed Go library that provides precise calculations for:
 Originally created in JavaScript by [Vladimir Agafonkin](http://agafonkin.com/en) ([@mourner](https://github.com/mourner)) as part of the [SunCalc.net project](http://suncalc.net), and translated to Go by Douglas Six.
 
 ## Installation
+
+```bash
+go get github.com/kixorz/suncalc@v1.0.0
+```
+
+Or for the latest version:
 
 ```bash
 go get github.com/kixorz/suncalc
